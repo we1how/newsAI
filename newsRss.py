@@ -1,3 +1,5 @@
+import os
+import json
 import requests
 import feedparser
 from bs4 import BeautifulSoup
@@ -5,6 +7,10 @@ import html
 import time
 import re
 import random
+from datetime import datetime, timezone
+
+# 全局配置文件路径
+LINKS_FILE = "analyzed_links.json"
 
 # 随机用户代理列表
 USER_AGENTS = [
@@ -22,7 +28,7 @@ def get_random_user_agent():
 def clean_html_content(html_content):
     """使用BeautifulSoup清理HTML内容并提取纯文本"""
     if not html_content:
-        return "无内容描述"
+        return ""
     
     try:
         # 先解码HTML实体
@@ -34,10 +40,6 @@ def clean_html_content(html_content):
         # 移除不需要的元素
         for element in soup(['script', 'style', 'img', 'a', 'br', 'iframe', 'object']):
             element.decompose()
-        
-        # 处理特殊标签
-        for strong in soup.find_all('strong'):
-            strong.replace_with(f"[重要] {strong.get_text(strip=True)} [重要结束]")
         
         # 获取纯净文本
         text = soup.get_text(separator='\n', strip=True)
@@ -118,8 +120,31 @@ def parse_rss_feed(xml_content):
         print(f"解析RSS失败: {str(e)}")
         return None
 
+def load_analyzed_links():
+    """加载已分析的链接"""
+    if not os.path.exists(LINKS_FILE):
+        return {
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "links": []
+        }
+    
+    try:
+        with open(LINKS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"加载链接文件失败: {str(e)}")
+        return {
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "links": []
+        }
+
+def save_analyzed_links(link_data):
+    """保存已分析的链接"""
+    with open(LINKS_FILE, "w", encoding="utf-8") as f:
+        json.dump(link_data, f, ensure_ascii=False, indent=2)
+
 def fetch_cls_news(rss_url):
-    """从财联社RSS源获取新闻"""
+    """从财联社RSS源获取新闻并过滤已分析的"""
     xml_content = fetch_rss_content(rss_url)
     if not xml_content:
         print("无法获取RSS内容")
@@ -130,13 +155,23 @@ def fetch_cls_news(rss_url):
         print("解析RSS源失败")
         return []
     
-    news_items = []
+    # 加载已分析的链接
+    link_data = load_analyzed_links()
+    analyzed_links = set(link_data["links"])
+    
+    # 收集新新闻
+    new_news = []
+    
     for entry in feed.entries:
         # 获取基本元数据
         title = entry.get('title', '无标题')
         pub_date = entry.get('published', '未知时间')
         author = entry.get('author', '未知作者')
         link = entry.get('link', '')
+        
+        # 跳过已分析的链接
+        if link in analyzed_links:
+            continue
         
         # 特殊处理description字段
         raw_description = entry.get('description', '')
@@ -149,7 +184,7 @@ def fetch_cls_news(rss_url):
         # 提取新闻正文（去除来源行）
         content = re.sub(r'^财联社.*?[讯|电]', '', clean_description, count=1).strip()
         
-        news_items.append({
+        new_news.append({
             'title': title,
             'content': content,
             'source': source,
@@ -158,55 +193,26 @@ def fetch_cls_news(rss_url):
             'link': link
         })
     
-    return news_items
+    return new_news
 
-def format_datetime(dt_str):
-    """简化日期时间格式"""
-    try:
-        # 尝试解析常见格式
-        if 'GMT' in dt_str:
-            return dt_str.split('GMT')[0].strip()
-        return re.sub(r'\s+', ' ', dt_str.split(',', 1)[-1].strip())
-    except:
-        return dt_str
+def mark_links_as_analyzed(links):
+    """标记链接为已分析"""
+    link_data = load_analyzed_links()
+    
+    # 添加新链接
+    for link in links:
+        if link not in link_data["links"]:
+            link_data["links"].append(link)
+    
+    # 更新最后更新时间
+    link_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+    
+    # 保存
+    save_analyzed_links(link_data)
 
 if __name__ == "__main__":
     RSS_URL = "https://rsshub.app/cls/depth/1000"
     
     print("正在获取财联社新闻，可能需要一些时间...")
     news_data = fetch_cls_news(RSS_URL)
-
-    print(news_data)
-    
-    # if not news_data:
-    #     print("\n⚠️ 未能获取新闻数据，可能原因：")
-    #     print("- RSSHub服务器启用了Cloudflare防护")
-    #     print("- 您的IP地址可能被暂时限制")
-    #     print("- 网络连接问题")
-    #     print("\n建议：")
-    #     print("1. 稍后再试")
-    #     print("2. 使用VPN更换IP地址")
-    #     print("3. 考虑自建RSSHub实例")
-    #     exit()
-    
-    # print(f"\n获取到 {len(news_data)} 条财联社头条新闻:")
-    # print("=" * 100)
-    
-    # for i, news in enumerate(news_data, 1):
-    #     print(f"【{i}】标题: {news['title']}")
-    #     print(f"   来源: {news['source']} | 时间: {format_datetime(news['pub_date'])}")
-    #     print(f"   作者: {news['author']}")
-    #     print(f"   链接: {news['link']}")
-        
-    #     # 智能截断内容，保留完整句子
-    #     content = news['content']
-    #     if len(content) > 300:
-    #         # 找到300字符后的第一个句号位置
-    #         end_pos = content.find('.', 300)
-    #         if end_pos > 0:
-    #             content1 = content[:end_pos+1] + "..."
-    #         else:
-    #             content1 = content[:300] + "..."
-        
-    #     print(f"   内容: {content1}")
-    #     print("-" * 100)
+    print(f"获取到 {len(news_data)} 条新新闻")

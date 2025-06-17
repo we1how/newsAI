@@ -1,16 +1,87 @@
-
+from datetime import datetime, timezone
 import os
 import time
 import json
 from openai import OpenAI
 import newsRss
+import re
+from json.decoder import JSONDecodeError
 
-# 配置火山方舟API
+# 全局配置文件路径
+ANALYSIS_FILE = "news_analysis.json"
+
 def get_volcengine_client():
     return OpenAI(
         api_key='ba7b3e16-d8dc-4376-9003-ae52013e3506',
         base_url="https://ark.cn-beijing.volces.com/api/v3",
     )
+
+
+
+
+def fix_json_format(json_str):
+    """尝试修复常见的JSON格式错误，包括字段值引号缺失和对象闭合问题"""
+    # 尝试直接解析
+    try:
+        return json.loads(json_str)
+    except JSONDecodeError:
+        pass  # 继续尝试修复
+    
+    # 修复1: 确保整个对象闭合
+    open_braces = json_str.count('{')
+    close_braces = json_str.count('}')
+    if open_braces > close_braces:
+        json_str += '}' * (open_braces - close_braces)
+    
+    # 修复2: 处理所有字段值缺失引号的问题
+    # 匹配模式：字段名后跟冒号，然后是未用引号包围的值
+    field_pattern = r'("(?:stock|impact|reason|summary)":\s*)([^"][^,}\]\n]*)'
+    
+    # 多次尝试修复，直到解析成功或无法进一步修复
+    for _ in range(3):  # 最多尝试3次修复
+        try:
+            # 查找所有需要修复的字段
+            fixed_str = json_str
+            for match in re.finditer(field_pattern, json_str):
+                prefix = match.group(1)
+                bad_value = match.group(2).strip()
+                
+                # 跳过已经是字符串的值
+                if bad_value.startswith('"') and bad_value.endswith('"'):
+                    continue
+                
+                # 修复值：添加引号并转义内部的双引号
+                fixed_value = f'"{bad_value.replace("\\", "\\\\").replace("\"", "\\\"")}"'
+                fixed_str = fixed_str.replace(
+                    prefix + bad_value,
+                    prefix + fixed_value
+                )
+            
+            # 尝试解析修复后的JSON
+            return json.loads(fixed_str)
+        except JSONDecodeError as e:
+            # 如果仍然失败，尝试截取到最后一个有效位置
+            if e.pos > 0:
+                # 尝试截取到错误位置之前的内容
+                fixed_str = fixed_str[:e.pos]
+                # 确保对象闭合
+                if fixed_str.count('{') > fixed_str.count('}'):
+                    fixed_str += '}'
+            json_str = fixed_str  # 为下一次迭代准备
+    
+    # 最终尝试解析
+    try:
+        return json.loads(json_str)
+    except JSONDecodeError:
+        # 终极修复：提取可能有效的部分
+        matches = list(re.finditer(r'\{.*?\}', json_str, re.DOTALL))
+        if matches:
+            try:
+                return json.loads(matches[-1].group(0))
+            except JSONDecodeError:
+                pass
+        
+        return None
 
 def analyze_news_with_volcengine(news_item):
     """使用火山方舟API分析新闻"""
@@ -21,7 +92,7 @@ def analyze_news_with_volcengine(news_item):
 请分析以下新闻内容，完成以下任务：
 1. 将新闻内容总结成一句话；
 2. 判断分析该新闻对国内哪些具体股票有影响，并分析其影响是利好还是利空，给出具体的理由；
-3. 按以下JSON格式返回结果，需要对生成的结果进行检查，如果缺少了对应的括号或者符号，需要进行合理修补，以保证返回的格式正确：
+3. 可以有多个股票分析,按以下JSON格式返回结果：
 {{
     "summary": "新闻的一句话总结",
     "analysis": [
@@ -29,8 +100,7 @@ def analyze_news_with_volcengine(news_item):
             "stock": "股票名称",
             "impact": "利好/利空",
             "reason": "影响理由"
-        }},
-        // 可以有多个股票分析，如果没有股票受影响，可以返回空数组
+        }}
     ]
 }}；
 
@@ -59,11 +129,19 @@ def analyze_news_with_volcengine(news_item):
             json_end = result_text.rfind('}') + 1
             json_str = result_text[json_start:json_end]
             
-            # 解析JSON
-            result = json.loads(json_str)
+            # 使用修复函数解析
+            result = fix_json_format(json_str)
+            
+            if result is None:
+                print(f"JSON解析失败: {result_text}")
+                return {
+                    "summary": "解析失败",
+                    "analysis": []
+                }
+            
             return result
-        except json.JSONDecodeError:
-            print(f"JSON解析失败: {result_text}")
+        except Exception as e:
+            print(f"JSON解析失败: {str(e)}")
             return {
                 "summary": "解析失败",
                 "analysis": []
@@ -75,49 +153,43 @@ def analyze_news_with_volcengine(news_item):
             "summary": "API调用失败",
             "analysis": []
         }
-    
-def load_existing_analysis(file_path):
+
+def load_analysis_data():
     """加载已有的分析结果"""
-    if not os.path.exists(file_path):
+    if not os.path.exists(ANALYSIS_FILE):
         return []
     
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(ANALYSIS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"加载历史数据失败: {str(e)}")
+        print(f"加载分析数据失败: {str(e)}")
         return []
 
-def get_existing_titles(existing_data):
-    """从已有数据中提取标题集合"""
-    return {item["news"]["link"] for item in existing_data}
+def save_analysis_data(data):
+    """保存分析结果到文件"""
+    with open(ANALYSIS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def main():
+def analyze_new_news():
+    """分析新新闻并保存结果"""
     RSS_URL = "https://rsshub.app/cls/depth/1000"
-
-    OUTPUT_FILE = "news_analysis.json"
     
-    # 加载已有分析结果
-    existing_results = load_existing_analysis(OUTPUT_FILE)
-    existing_titles = get_existing_titles(existing_results)
+    print("正在获取财联社新新闻...")
+    new_news = newsRss.fetch_cls_news(RSS_URL)
     
-    print("正在获取财联社新闻...")
-    news_data = newsRss.fetch_cls_news(RSS_URL)
-    # news_data = [{'title': 'Circle上市暴涨后 又一加密货币公司谋划IPO', 'content': '[重要] 《科创板日报》6月7日讯 [重要结束] 在稳定币发行商Circle在纽交所上市暴涨之后，加密货币行业又一家公司开始谋划IPO。 据媒体消息显示，由Winklevoss兄弟经营的加密货币交易所Gemini Space Station已秘密向美国证券交易委员会(SEC)提交了一份S-1表格的草案注册声明，申请上市。虽然公司尚未确定具体发行股票数量及价格范围等细节，但Gemini表示，一旦SEC完成审查且市场条件适合，就将推进IPO。 Renaissance Capital高级策略师Matt Kennedy表示，Circle的交易盛况给了那些筹备IPO的加密货币公司继续推进上市的信心，“加密货币是一个难以预测的市场，当你得到这样一个机会时，你就要抓住它。” Gemini运营着一个交易平台，在这一平台上投资者能买卖和储存超过70种加密货币。经营着Gemini的Winklevoss兄弟此前曾起诉Facebook和马克•扎克伯格窃取了自己有关社交网站的创意，并因这起诉讼一举成名。之后双方在2008年达成和解，Winklevoss兄弟获得了现金和Facebook股票。 值得注意的是，随着美国国会考虑稳定币监管立法，该国整体加密货币监管环境或有望改善，业内多个公司准备冲击上市： 加密货币托管公司BitGo Inc.考虑今年晚些时候进行IPO； 作为最老牌加密货币交易所之一的Kraken准备在2026年初上市； 数字资产交易所Blockchain.com进行多项招聘，以加速IPO。 中信证券认为，近期美国等多个稳定币立法取得阶段进展，特朗普政府推动加密货币相关法案有三种目的：帮助家族进行财富积累及兑现竞选承诺；推动稳定币市场扩张以缓解美债需求不足压力；强化稳定币与美元的绑定关系，延缓去美元化进程。因此稳定币的正规化进程有望继续。而稳定币市场的扩张和发展对加密货币的上行形成中长期利好。不过加密货币的加速上行行情或需等待特朗普的政策确定性。', 'source': '财联社', 'pub_date': 'Sat, 07 Jun 2025 12:55:43 GMT', 'author': '科创板日报', 'link': 'https://www.cls.cn/detail/2051477'}, {'title': '芯片“卖铲人”EDA封锁升级 国产半导体迎来危与机｜行业观察', 'content': '[重要] 财联社2025年6月7日讯（记者 王碧微） [重要结束] 5月下旬，美国对华EDA（电子设计自动化）出口管制，通过非公开信函的方式进入新阶段。 一方面，普冉股份(688766.SH)等成熟制程芯片设计企业对以投资者身份致电的财联社记者表示，由于技术迭代频率不高，现有工具尚可满足需求，因此所受影响有限；但另一方面，多位产业链人士及分析师指出，此次管制直指芯片设计的源头，对中国冲击先进制程的努力构成考验。 “这也为生态带来更多的创新机遇，这个生态是有机的、动态传导的。”芯华章联席CEO谢仲辉在接受财联社记者采访时，给出了一个更具辩证性的判断。他认为，相较于几年前，国内产业如今已具备更强的韧性，能够“兵来将挡、应时而变”。 在此背景下，国产半导体设计产业的真实温度究竟如何？能否实现从压力倒逼、“解决卡脖子”到“创造新价值”的结构性机遇？ [重要] EDA技术封锁升级 国产设计商：主要影响先进制程 [重要结束] “它对我们影响不大，因为我们大部分都是成熟制程，”A股上市芯片设计公司普冉股份的证券部人士对以投资者身份致电的财联社记者明确表示，“我们暂时就用现有的这一代策划工具就可以了。” 这一回应，揭示了此次EDA封锁影响的“非对称性”。 日前，EDA三巨头铿腾电子（Cadence）、新思科技（Synopsys）西门子（Siemens）先后以公告、声明的方式表示接到了美国政府针对EDA软件工具的对华出口限制。铿腾电子公告表示，公司于5月23日接BIS通知，当交易方位于中国，出口、再出口或境内转让《商业管制清单》中出口管制分类号（ECCNs）为3D991和3E991的电子设计自动化（EDA）软件及技术，需事先取得许可。 值得一提的是，有多位受访人士向财联社记者提到，业内传闻，目前的限制主要集中于EDA，IP暂时不受限制。 据了解，目前EDA三巨头占领了绝大多数市场份额。在2024中国（深圳）集成电路峰会EDA分论坛上，国产EDA龙头华大九天（301269.SZ）副总经理郭继旺曾表示，国际“三巨头”的市场占有率超过80%。 中国市场是三大巨头的重要收入来源，根据财报数据，2024财年，中国区业务分别占到新思科技和铿腾电子总营收的16%和12%。禁令消息传出后，新思科技暂停了其2025财年第三季度及全年的财务指引，其股价在5月28日、29日两日累计下跌超过11%。 然而，这股冲击波传递至国内产业链时，却呈现出明显的分化。 “主要影响是着重前端的。先进制程的会受影响大。”一位产业链人士告诉财联社记者。 普冉股份证券部人士的观点进一步印证了这一点。“他（禁令）可能对于特种芯片的设计，包括一些相对偏先进制程或者那种跟进迭代比较快的影响会比较大。像我们这种相对通用型的比较成熟的芯片，迭代也不会特别频繁，所以对我们影响几乎微乎其微。”该人士表示，对于是否已采用国产EDA，其称“有用，我们之前还投了华大九天，都是有在推进合作的。” 这意味着，对于国内众多聚焦于成熟制程的消费电子、物联网等领域的芯片设计公司而言，现有的EDA工具尚能满足设计需求，短期内受到的直接冲击相对有限。然而，对于那些致力于在AI、高性能计算（HPC）等领域追赶世界前沿，亟需最新工艺节点PDK（工艺设计套件）支持和原厂技术服务的先进芯片设计公司，此次封锁无疑构成了考验。 6月2日，中国商务部新闻发言人亦就美方近期歧视性限制措施表示，这些做法严重损害中方正当权益。 [重要] 产业链早有准备：从“解决卡脖子”到“价值共创” [重要结束] 尽管封锁来势汹汹，但产业界对此并非毫无准备。更重要的是，在压力的倒逼之下，一种不同于简单“国产替代”的本土化创新模式正在显现。 “（封锁升级）之前都有预判，”前述产业链人士称，“囤货和国产替代都会有。” 事实上，在本次禁令落地之前，国产芯片设计公司增加对EDA工具采购的趋势已有显现。财联社记者梳理多家A股芯片公司2024年年报发现，瑞芯微的长期应付款因“购买EDA工具增加”而同比增长294.58%；炬芯科技的其他应付款也因“采购EDA工具应付款项增加”而增长217%。 但比“囤货”更具深远意义的，是国产EDA厂商与本土客户之间协同模式的质变——从单纯地解决“卡脖子”问题，升级为共同创造独特价值。 “国际EDA巨头虽占据主导地位，但其标准化工具难以满足国产芯片在工艺受限下的创新需求。”谢仲辉向记者剖析道。他解释，当先进制造工艺受限，设计公司必须在算子、架构等方面进行创新，以求在有限的条件下实现性能突破。这直接导致了大量非标、高复杂度的验证难题，而传统EDA工具为标准化流程而生，面对这类挑战时效率会断崖式下跌，成为项目周期的主要瓶颈。 这恰恰为国产EDA提供了突围空间。“国产替代的本质是供应链安全与价值升级并重，”谢仲辉强调，“我们的优势是贴近客户需求和快速响应，与客户建立深度协同、实现价值共创。” 他分享了一个鲜活的案例，以说明这种“价值共创”模式的威力：国内某头部互联网客户的AI推理芯片项目，曾因其独特的AI算子和复杂的场景化需求，导致验证效率低下而陷入僵局。芯华章的技术团队在深入了解客户的设计流程和代码风格后，介入进行联合攻关，通过优化其GalaxEC-HEC工具中的底层求解器（Solver）性能，并为其定制开发了专门的优化工具，仅用两周时间，便成功解决了这一难题，将原本预计长达三个月的验证周期，成功压缩到了三周。 “如果是国际EDA巨头，他们有很重的技术包袱，很难为了某一家公司的特定风格去设计一个新的工具版本。”谢仲辉说。这种“场景驱动、客户定义”的创新逻辑，让国产EDA能够提供国际竞品难以企及的定制化解决方案。 硬核的技术指标是这种“价值共创”的底气。 谢仲辉介绍，芯华章与中兴微电子、飞腾等国内龙头企业合作，将其自研的底层引擎应用在形式验证工具中，在飞腾某国产CPU项目中，“在没有增加太多人力资源的情况下，实现了将近9倍于项目1算子数量的证明”；在中兴微电子研发团队的实测中，该工具实现了“pass5@较基线提升59%，复杂断言开发效率提升40%以上，原本需要3天的调试周期缩短至数小时”。其系统级调试工具Fusion Debug，在某些应用场景下，效率甚至能取得相对国际主流工具3-5倍的领先。 “这和DEEPSEEK能够借用创新模型的训练方式，用比较低的成本能耗，达到国际领先水平，是异曲同工的。”谢仲辉类比道。他认为，类似支持分布式的GalaxSim Turbo、双模硬件原型验证系统HuaPro P2E等国产创新技术若能更广泛地被使用，必将加速国产芯片的整体创新速度。 [重要] 未来走向何方？自主长征路漫漫 [重要结束] 封锁将国产EDA推向了前台，但清醒的从业者都明白，这绝非一场可以速胜的闪电战，而是一场考验耐力与智慧的“长征”。 “国内EDA软件主要集中在模拟电路、射频、存储设计、仿真及验证等环节，可以取代部分国外EDA。但高阶复杂的数字设计、SoC设计、系统级设计等与国外仍存在较大差距。”CINNO Research首席分析师周华向记者分析道。 追赶的艰辛，直观地体现在本土EDA龙头企业的财报上。 根据公开财报，华大九天2024年研发费用占营收比例高达71.02%；概伦电子（688206.SH）同期研发投入强度也远超常规科技企业，其2025年一季度研发投入占比更是达到了惊人的80.49%。 然而，高强度的“输血”背后，是两家公司在2024年均录得扣非净亏损的现实。 “长期看（对国产EDA）肯定是有机会的，但短期会不太明显。”概伦电子证券部人士对以投资者身份致电的财联社记者解释道，“这个事情从发生到现在可能只有一周的时间。软件的断供可能没有设备那样一刀切。其次，软件客户验证和签单的周期都会比较长一点，我们又是逐日确认的收入确认方法，因此在短期的业绩层面上来看，可能很难见到一个特别明显的直观的效果。” 用户习惯、工具链的完整性、以及商业模式的探索，都是摆在国产EDA面前的现实挑战。“EDA是一门应用工程学，用户的使用和反馈越多，越能推动工具的加速进化，”谢仲辉坦言，“但同时，国际巨头的垄断性强，导致EDA相关技术创新速度缓慢，需要有外力打破格局。”此外，他也指出，“客户对软件的付费意愿低”仍是行业的一大痛点。 在这场自主长征中，并购整合与新兴技术赛道的探索，成为国产EDA企业寻求突破的关键路径。 周华分析称：“国内领先的EDA软件公司如华大九天、概伦、思尔芯、广立微(301095.SZ)等在设计EDA软件、FPGA原型验证、Spice仿真均各有长处，如果能透过并购或策略联盟突破资金与技术壁垒，相信可以快速增强国内EDA的实力。” 事实上，华大九天已在推进对射频及先进封装EDA领先企业芯和半导体的收购工作。根据公开资料，芯和半导体在Chiplet（芯粒）所需的系统级设计（SI/PI）等领域技术积累深厚，此次并购被视为华大九天补强其在先进封装及系统级设计能力的重要举措。 “在当前的趋势下，中国半导体产业的发展需要‘以我为主’，采用国产EDA是必由之路。”谢仲辉展望道，“这个进程确实很难给出一个具体的时间表，产业近30年，这样的巨变是全新的挑战，我认为在国产市占率突破五成之前，我们都不应该松懈。”', 'source': '财联社', 'pub_date': 'Sat, 07 Jun 2025 12:53:10 GMT', 'author': '财联社记者 王碧微', 'link': 'https://www.cls.cn/detail/2051475'},{'title': '财联社C50风向指数调查：6月流动性宽松延续 买卖国债能否重启市场预期分化', 'content': '[重要] 财联社6月7日讯（记者 夏淑媛） [重要结束] 新一期财联社“C50风向指数”结果显示，6月存单到期量将大幅提升至4.2万亿元，面对密集到期压力，市场普遍预期银行将加大同业存单发行力度，以对冲潜在流动性缺口，但对整体资金面扰动有限。尤其在央行以固定数量、利率招标、多重价位中标方式开展万亿元买断式逆回购操作的背景下，市场机构预计银行体系流动性延续宽松。 在20家参与调查的市场机构中，19家认为6月流动性合理充裕，16家预计2025年货币政策维持宽松基调。对于央行买卖国债能否重启市场预期分化，12家市场机构预计有望适时重启，8家认为还需根据债券市场供需，以及收益率曲线形态等综合研判。 “C50风向指数调查”是由财联社发起，由市场中的各类研究机构参与完成，结果能够较为全面地反映市场机构对于宏观经济走势、货币政策感受以及金融数据的预期。共有近20家机构参与本期调查。 [重要] 6月流动性或合理充裕，央行买卖国债能否重启市场预期分化 [重要结束] 回顾5月，随着一揽子金融政策落地，资金利率水平较4月再下台阶。 公开市场方面，央行通过7天期逆回购操作小规模净回笼152亿元，1年期MLF（中期借贷便利）增量续作3750亿元，买断式逆回购净回笼2000亿元。同时，5月7日央行宣布降息0.1个百分点、降准0.5个百分点，释放约1万亿元流动性。 “合计来看，虽然5月逆回购、MLF操作释放流动性不算太多，但结合降准来看，央行呵护资金面的态度不改，资金面进一步宽松。”国金证券固收首席分析师尹睿哲对财联社记者表示。 进入6月，资金面将会如何演绎？财联社C50风向指数调查显示，在央行以固定数量、利率招标、多重价位中标方式开展万亿元买断式逆回购操作的背景下，市场机构普遍预计，银行体系流动性有望合理充裕。在20家参与调查的市场机构中，19家认为6月流动性有望保持宽松，16家预计2025年货币政策维持宽松基调。 对于央行于6月5日首次在月初预告将开展1万亿元买断式逆回购操作，东方金诚首席宏观分析师王青表示，此举有助于保持银行体系流动性持续处于充裕状态，控制资金面波动，稳定市场预期。 值得注意的是，央行自1月暂停购债后已连续5个月未开展国债买卖操作。在2025年一季度货币政策执行报告中，央行曾表示“将继续从宏观审慎的角度观察、评估债市运行情况，关注国债收益率的变化，视市场供求状况择机恢复操作”。 对于买卖国债能否重启，市场预期分化。财联社C50风向指数调查显示，12家市场机构预计有望适时重启，8家认为能否重启还需要根据债券市场供需，以及收益率曲线形态等综合研判。 “如若央行行为进一步宽松，可能催化长端利率的下行，当中关注央行超预期重启国债购买的可能性。”天风证券固收首席分析师谭逸鸣表示。 在东吴证券首席经济学家、研究所联席所长芦哲看来，重启国债买卖的时点还需要根据债券市场供需和收益率曲线形态来综合研判。 一方面若国债发行量较大，流动性冲击产生了“加息”效应，为配合扩张性财政的效应更好发挥，确保政策效应达到预期，此时启动国债买卖可以达到调节市场流动性、稳定收益率的目的。 另一方面若收益率曲线形态基本稳定，国债买卖不会“挤出”投资者的配置需求，不会加剧收益率的单边下行，或可以考虑重启国债买卖进一步稳定市场预期。 “进入6月，降准、降息的政策效应仍处于观察期，且财政政策仍在积极推进政府债融资，预计货币政策仍以买断式逆回购、MLF和7天期逆回购以及PSL等结构性政策工具为主调节流动性供需，国债买卖重启仍需综合研判形势。”芦哲表示。 [重要] 6月存单到期量将大幅提升至4.2万亿元，资金利率有望向政策利率回归 [重要结束] 今年以来，银行同业存单累计融资额处于高位，市场一度顾虑6月集中到期的同业存单规模。 Wind数据显示，5月同业存单到期规模接近2.5万亿元，与4月基本持平，而6月存单到期量将大幅提升至4.2万亿元，为历史单月到期最大规模。其中，上旬和中旬为集中到期时点，分别有约9200亿元和1.95万亿元存单将到期。 为何6月同业存单到期规模如此之大？招商证券银行首席分析师王先爽对财联社记者表示，主要受3M、6M、12M三个期限大额到期共振影响。 去年二季度，“手工补息”整改启动，银行存款大幅流失，流动性指标边际承压，银行1Y存单发行规模超季节性。 此外，在2024年12月同业自律影响下，同业存款流出，银行存单规模大幅扩张，同时考虑到临近年末考核，银行发行存单期限以6M为主，12月单月6M存单发行规模达10482亿元，为历史单月6M存单发行规模之最。 从今年来看，3月也是定期非银行存款到期大月，同业自律导致非银存款到期不续，同时资金面偏紧，银行有跨季后资金转松的期待，发行短期存款应对资金缺口，3月发行15488亿元3M存单，这也是历史单月3M存单发行规模之最。 “总体来看，以上三个时间段大额发行的存单均主要集中在今年6月到期。”王先爽表示。 面对密集到期压力，市场普遍预期银行将加大同业存单发行力度，以对冲潜在流动性缺口。不过，多位业内人士表示，6月同业存单的集中到期对整体资金面的扰动可能有限。 “机构对于6月同业存单的续作压力已经有一定心理准备。在季末负债压力偏大的情况下，大行选择将部分压力前置，在5月末一周即开启偏长期同业存单的发行。”中邮证券固定收益首席分析师梁伟超对财联社记者介绍。 王先爽预计，6月存单规模保持扩张，考虑到目前个别银行存单备案使用率也即将见顶，以及潜在的存款迁徙压力，6月存单发行期限或将有所拉长，一二级市场定价上行概率较大，上行幅度和持续时间核心看央行流动性支持力度。中期看，随着6月到期高峰过去，银行间市场资金稳定性会重新上升，资金利率和存单利率有望下行，重新向政策利率靠拢回归。', 'source': '财联社6月7日讯', 'pub_date': 'Sat, 07 Jun 2025 02:09:56 GMT', 'author': '财联社记者 夏淑媛', 'link': 'https://www.cls.cn/detail/2051367'}]
-
-    new_news_data = [news for news in news_data if news["link"] not in existing_titles]
-
-    if not new_news_data:
-        print("\n没有新的新闻需要分析")
-        return
+    if not new_news:
+        print("没有新的新闻需要分析")
+        return []
     
-    print(f"\n获取到 {len(news_data)} 条新闻，其中 {len(new_news_data)} 条是新的，开始分析...\n")
+    print(f"获取到 {len(new_news)} 条新新闻，开始分析...")
     
-    # 存储新分析结果
-    new_results = []
+    # 分析新新闻
+    analysis_results = []
+    analyzed_links = []
     
-    for i, news in enumerate(new_news_data, 1):
-        print(f"分析新闻 {i}/{len(new_news_data)}: {news['title']}")
+    for i, news in enumerate(new_news, 1):
+        print(f"分析新闻 {i}/{len(new_news)}: {news['title']}")
         
         # 调用火山模型分析
         analysis_result = analyze_news_with_volcengine(news)
@@ -125,30 +197,47 @@ def main():
         # 合并原始新闻数据和分析结果
         combined = {
             "news": news,
-            "analysis": analysis_result
+            "analysis": analysis_result,
+            "analyzed_at": datetime.now(timezone.utc).isoformat()
         }
-        new_results.append(combined)
+        analysis_results.append(combined)
+        if analysis_result.get("analysis") != []:
+            # 记录已分析的链接
+            analyzed_links.append(news["link"])
         
         # 打印当前结果
         print(f"  总结: {analysis_result.get('summary', '')}")
-        for stock_analysis in analysis_result.get('analysis', []):
-            print(f"  股票: {stock_analysis.get('stock', '')} | 影响: {stock_analysis.get('impact', '')}")
-            print(f"  理由: {stock_analysis.get('reason', '')}")
+        # for stock_analysis in analysis_result.get('analysis', []):
+        #     print(f"  股票: {stock_analysis.get('stock', '')} | 影响: {stock_analysis.get('impact', '')}")
+        #     print(f"  理由: {stock_analysis.get('reason', '')}")
         print("-" * 80)
         
         # 避免请求过快
         time.sleep(1)
     
-    # 合并新旧结果
-    all_results = existing_results + new_results
+    if analysis_results:
+        # 保存分析结果
+        existing_data = load_analysis_data()
+        updated_data = analysis_results + existing_data
+        save_analysis_data(updated_data)
+        
+        # 标记链接为已分析
+        newsRss.mark_links_as_analyzed(analyzed_links)
+        
+        print(f"成功分析并保存 {len(analysis_results)} 条新新闻")
     
-    # 保存结果到文件
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_results, f, ensure_ascii=False, indent=2)
+    return analysis_results
+
+def get_latest_news_analysis(max_items=5):
+    """获取最新的新闻分析"""
+    data = load_analysis_data()
+    if not data:
+        return []
     
-    print(f"\n分析完成! 新增 {len(new_results)} 条分析，总计 {len(all_results)} 条结果已保存到 {OUTPUT_FILE}")   
+    # 按分析时间排序（最新的在前）
+    data.sort(key=lambda x: x.get("analyzed_at", ""), reverse=True)
+    
+    return data[:max_items]
 
 if __name__ == "__main__":
-    main()
-
-
+    analyze_new_news()

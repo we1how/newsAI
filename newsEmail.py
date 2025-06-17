@@ -1,37 +1,15 @@
-import json
 import os
 import smtplib
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+import news_analyzer  # 导入分析模块
 
-def load_news_analysis(file_path="news_analysis.json"):
-    """加载新闻分析结果"""
-    if not os.path.exists(file_path):
-        print(f"文件 {file_path} 不存在")
-        return []
-    
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"加载分析结果失败: {str(e)}")
-        return []
-
-def format_news_for_email(analysis_data, max_items=10):
+def format_news_for_email(analysis_data):
     """格式化新闻分析结果用于邮件发送"""
     if not analysis_data:
         return "暂无最新财经新闻分析", ""
-    
-    # 按时间排序（最新的在前）
-    sorted_data = sorted(
-        analysis_data,
-        key=lambda x: x["news"].get("pub_date", ""),
-        reverse=True
-    )
-    
-    # 获取最新几条
-    recent_data = sorted_data[:max_items]
     
     # 构建纯文本内容
     text_content = ["📰 最新财经新闻分析报告 📰\n"]
@@ -49,17 +27,17 @@ def format_news_for_email(analysis_data, max_items=10):
             .summary { margin-bottom: 10px; color: #34495e; }
             .stock-list { margin-left: 15px; }
             .stock-item { margin-bottom: 5px; }
-            .positive { color: #27ae60; }
-            .negative { color: #e74c3c; }
+            .positive { color: #e74c3c; }
+            .negative { color: #27ae60; }
             .link { color: #3498db; text-decoration: none; font-size: 13px; }
             .footer { margin-top: 20px; font-size: 12px; color: #95a5a6; text-align: center; }
         </style>
     </head>
     <body>
-        <div class="header">📰 最新财经新闻分析报告 📰</div>
+        <div class="header">📰 实时财经新闻分析报告 📰</div>
     """
     
-    for i, item in enumerate(recent_data, 1):
+    for i, item in enumerate(analysis_data, 1):
         news = item["news"]
         analysis = item["analysis"]
         
@@ -120,7 +98,7 @@ def format_news_for_email(analysis_data, max_items=10):
     # 添加页脚
     html_content += f"""
         <div class="footer">
-            共 {len(recent_data)} 条分析 | 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+            共 {len(analysis_data)} 条新闻 | 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M")}
         </div>
     </body>
     </html>
@@ -140,7 +118,6 @@ def send_email_via_qq(subject, text_content, html_content, receiver):
     
     if not email_user or not email_password:
         print("未设置QQ邮箱或授权码环境变量")
-        print("请设置环境变量: QQ_EMAIL 和 QQ_EMAIL_PASSWORD")
         return False
     
     # 创建邮件
@@ -171,47 +148,68 @@ def send_email_via_qq(subject, text_content, html_content, receiver):
         print(f"邮件发送失败: {str(e)}")
         return False
 
-def main():
-    # 1. 加载分析结果
-    analysis_data = load_news_analysis()
-    if not analysis_data:
-        print("没有可发送的分析结果")
-        return
+def send_news_email():
+    """发送新闻邮件"""
+    # 1. 分析新新闻
+    print("开始分析新新闻...")
+    new_analysis = news_analyzer.analyze_new_news()
     
-    # 2. 格式化消息
-    text_content, html_content = format_news_for_email(analysis_data)
+    if not new_analysis:
+        print("没有新新闻分析")
+        return False
     
-    # 3. 设置邮件主题和接收人
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    # 2. 获取最新的分析结果（即刚分析的）
+    latest_results = new_analysis  # 最多取5条
+    
+    # 3. 格式化消息
+    text_content, html_content = format_news_for_email(latest_results)
+    
+    # 4. 设置邮件主题和接收人
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     subject = f"📈 财经新闻分析报告 {date_str}"
     receiver = os.environ.get("QQ_EMAIL")
-
-    print(os.environ.get("QQ_EMAIL"))
-    print(os.environ.get("QQ_EMAIL_PASSWORD"))
     
     if not receiver:
-        print("未提供接收邮箱")
-        return
+        print("未设置接收邮箱")
+        return False
     
-    # 4. 发送邮件
+    # 5. 发送邮件
     if send_email_via_qq(subject, text_content, html_content, receiver):
         print("邮件发送成功!")
-    else:
-        print("邮件发送失败，请检查配置")
+        return True
+    return False
 
-if __name__ == "__main__":
+def main():
+    """主函数，支持定时运行"""
     # 配置说明
     print("=" * 60)
-    print("财经新闻邮件推送系统")
+    print("实时财经新闻邮件推送系统")
     print("=" * 60)
-    print("使用前请确保:")
-    print("1. 已设置QQ邮箱环境变量:")
-    print("   export QQ_EMAIL=your_email@qq.com")
-    print("   export QQ_EMAIL_PASSWORD=your_authorization_code")
-    print("2. 授权码获取方法:")
-    print("   - 登录QQ邮箱网页版")
-    print("   - 设置 > 账号 > 生成授权码")
-    print("=" * 60)
-    print()
+    # print("使用前请确保:")
+    # print("1. 已设置QQ邮箱环境变量:")
+    # print("   export QQ_EMAIL=your_email@qq.com")
+    # print("   export QQ_EMAIL_PASSWORD=your_authorization_code")
+    # print("2. 已配置火山方舟API密钥:")
+    # print("   export ARK_API_KEY=your_volcengine_api_key")
+    # print("=" * 60)
     
+    # 首次立即发送
+    if send_news_email():
+        print("邮件发送成功!")
+    else:
+        print("邮件发送失败")
+    
+    # # 每小时运行一次
+    # while True:
+    #     next_run = time.time() + 3600
+    #     print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
+    #     time.sleep(3600)  # 等待1小时
+        
+    #     print("\n开始新一轮新闻收集与发送...")
+    #     if send_news_email():
+    #         print("邮件发送成功!")
+    #     else:
+    #         print("没有新内容或邮件发送失败")
+
+if __name__ == "__main__":
     main()
