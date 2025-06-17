@@ -1,0 +1,2 @@
+export QQ_EMAIL=2698470157@qq.com
+export QQ_EMAIL_PASSWORD=nrpwfrrkraagdgig
