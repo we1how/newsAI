@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import news_analyzer  # 导入分析模块
+import stock2csv
 
 def format_news_for_email(analysis_data):
     """格式化新闻分析结果用于邮件发送"""
@@ -180,6 +181,14 @@ def send_news_email():
     return False
 
 def main():
+    os.environ['QQ_EMAIL'] = '2698470157@qq.com'
+    os.environ['QQ_EMAIL_PASSWORD'] = 'nrpwfrrkraagdgig'  # 替换为实际的授权码
+
+    JSON_FILE = "news_analysis.json"
+    EXCEL_FILE = "新闻股票跟踪.xlsx"
+    
+    
+
     """主函数，支持定时运行"""
     # 配置说明
     print("=" * 60)
@@ -196,20 +205,26 @@ def main():
     # 首次立即发送
     if send_news_email():
         print("邮件发送成功!")
+        stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
     else:
         print("邮件发送失败")
     
-    # # 每小时运行一次
-    # while True:
-    #     next_run = time.time() + 3600
-    #     print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
-    #     time.sleep(3600)  # 等待1小时
-        
-    #     print("\n开始新一轮新闻收集与发送...")
-    #     if send_news_email():
-    #         print("邮件发送成功!")
-    #     else:
-    #         print("没有新内容或邮件发送失败")
+    # 每小时运行一次
+    while True:
+        next_run = time.time() + 3600
+        print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
+        time.sleep(3600)  # 等待1小时
+
+        # 执行转换
+        stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
+
+        print("\n开始新一轮新闻收集与发送...")
+        if send_news_email():
+            print("邮件发送成功!")
+        else:
+            print("没有新内容或邮件发送失败")
+
+
 
 if __name__ == "__main__":
     main()

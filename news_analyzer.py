@@ -51,7 +51,8 @@ def fix_json_format(json_str):
                     continue
                 
                 # 修复值：添加引号并转义内部的双引号
-                fixed_value = f'"{bad_value.replace("\\", "\\\\").replace("\"", "\\\"")}"'
+                escaped_value = bad_value.replace("\\", "\\\\").replace("\"", "\\\"")
+                fixed_value = f'"{escaped_value}"'
                 fixed_str = fixed_str.replace(
                     prefix + bad_value,
                     prefix + fixed_value
@@ -97,7 +98,7 @@ def analyze_news_with_volcengine(news_item):
     "summary": "新闻的一句话总结",
     "analysis": [
         {{
-            "stock": "股票名称",
+            "stock": "股票名称（股票代码.后缀）",
             "impact": "利好/利空",
             "reason": "影响理由"
         }}
@@ -105,12 +106,13 @@ def analyze_news_with_volcengine(news_item):
 }}；
 
 4. 以下是要分析的新闻内容：
-{news_item['content'][:3000]}  // 限制长度
+{news_item['content']}  // 限制长度
 """
     
     try:
         response = client.chat.completions.create(
-            model="deepseek-r1-250528",
+            # model="deepseek-r1-250528",
+            model = "deepseek-v3-250324",
             messages=[
                 {"role": "system", "content": "你是一个十分顶级专业的大师级金融分析师、股票专家，擅长从新闻中识别对股票的影响，并且不遗余力地给出专业的分析和建议。"},
                 {"role": "user", "content": prompt}
@@ -218,7 +220,10 @@ def analyze_new_news():
     if analysis_results:
         # 保存分析结果
         existing_data = load_analysis_data()
-        updated_data = analysis_results + existing_data
+        # 保留已有数据
+        # updated_data = analysis_results + existing_data   
+        # 只保留最新分析结果
+        updated_data = analysis_results
         save_analysis_data(updated_data)
         
         # 标记链接为已分析
