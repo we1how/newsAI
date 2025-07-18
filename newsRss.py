@@ -193,7 +193,7 @@ def fetch_cls_news(rss_url):
             'link': link
         })
     
-    return new_news[:5]
+    return new_news[:15]
 
 def mark_links_as_analyzed(links):
     """标记链接为已分析"""

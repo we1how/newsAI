@@ -259,7 +259,8 @@ def update_stock_performance(excel_file):
                         updated_rows += 1
                 else:
                     # 日期未到，记录日期
-                    df.at[index, '次日表现'] = next_date
+                    # df.at[index, '次日表现'] = next_date
+                    df.at[index, '次日表现'] = ''
                     updated_rows += 1
         
         # 处理三日表现
@@ -281,7 +282,8 @@ def update_stock_performance(excel_file):
                         updated_rows += 1
                 else:
                     # 日期未到，记录日期
-                    df.at[index, '三日表现'] = third_date
+                    # df.at[index, '三日表现'] = third_date
+                    df.at[index, '三日表现'] = ''
                     updated_rows += 1
         
         # 避免请求过于频繁

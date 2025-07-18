@@ -111,8 +111,8 @@ def analyze_news_with_volcengine(news_item):
     
     try:
         response = client.chat.completions.create(
-            # model="deepseek-r1-250528",
-            model = "deepseek-v3-250324",
+            model="deepseek-r1-250528",
+            # model = "deepseek-v3-250324",
             messages=[
                 {"role": "system", "content": "你是一个十分顶级专业的大师级金融分析师、股票专家，擅长从新闻中识别对股票的影响，并且不遗余力地给出专业的分析和建议。"},
                 {"role": "user", "content": prompt}
@@ -202,10 +202,12 @@ def analyze_new_news():
             "analysis": analysis_result,
             "analyzed_at": datetime.now(timezone.utc).isoformat()
         }
-        analysis_results.append(combined)
+        # analysis_results.append(combined)
+        analyzed_links.append(news["link"]) # 无论分析结果如何，都记录链接
         if analysis_result.get("analysis") != []:
-            # 记录已分析的链接
-            analyzed_links.append(news["link"])
+            # # 记录已分析的链接
+            # analyzed_links.append(news["link"])
+            analysis_results.append(combined) #  仅在有分析结果时添加
         
         # 打印当前结果
         print(f"  总结: {analysis_result.get('summary', '')}")
