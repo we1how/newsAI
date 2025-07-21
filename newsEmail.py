@@ -209,20 +209,20 @@ def main():
     else:
         print("邮件发送失败")
     
-    # 每小时运行一次
-    while True:
-        next_run = time.time() + 7200
-        print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
-        time.sleep(7200)  # 等待2小时
+    # # 每小时运行一次
+    # while True:
+    #     next_run = time.time() + 7200
+    #     print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
+    #     time.sleep(7200)  # 等待2小时
 
-        # 执行转换
-        stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
+    #     # 执行转换
+    #     stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
 
-        print("\n开始新一轮新闻收集与发送...")
-        if send_news_email():
-            print("邮件发送成功!")
-        else:
-            print("没有新内容或邮件发送失败")
+    #     print("\n开始新一轮新闻收集与发送...")
+    #     if send_news_email():
+    #         print("邮件发送成功!")
+    #     else:
+    #         print("没有新内容或邮件发送失败")
 
 
 

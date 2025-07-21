@@ -95,7 +95,7 @@ def analyze_news_with_volcengine(news_item):
 2. 判断分析该新闻对国内A股市场哪些具体股票有影响，并分析其影响是利好还是利空，给出具体的理由，如果没有则跳过该新闻；
 3. 可以有多个股票分析,按以下JSON格式返回结果：
 {{
-    "summary": "新闻的一句话总结",
+    "summary": "新闻的一句话总结(如果没有则用新闻标题代替)",
     "analysis": [
         {{
             "stock": "A股股票名称（股票代码.后缀）",
@@ -175,7 +175,7 @@ def save_analysis_data(data):
 
 def analyze_new_news():
     """分析新新闻并保存结果"""
-    RSS_URL = "https://rsshub.app/cls/depth/1000"
+    RSS_URL = "https://rsshub.rssforever.com/cls/depth/1000"
     
     print("正在获取财联社新新闻...")
     new_news = newsRss.fetch_cls_news(RSS_URL)

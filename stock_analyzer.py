@@ -305,3 +305,4 @@ if __name__ == "__main__":
     
     # 执行更新
     update_stock_performance(EXCEL_FILE)
+    # stock_info_global_cls_df = ak.stock_info_global_cls(symbol="全部")

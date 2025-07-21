@@ -193,7 +193,7 @@ def fetch_cls_news(rss_url):
             'link': link
         })
     
-    return new_news[:15]
+    return new_news[:5]
 
 def mark_links_as_analyzed(links):
     """标记链接为已分析"""
@@ -211,8 +211,9 @@ def mark_links_as_analyzed(links):
     save_analyzed_links(link_data)
 
 if __name__ == "__main__":
-    RSS_URL = "https://rsshub.app/cls/depth/1000"
-    
+    RSS_URL = "https://rsshub.rssforever.com/cls/depth/1000"
+
     print("正在获取财联社新闻，可能需要一些时间...")
     news_data = fetch_cls_news(RSS_URL)
     print(f"获取到 {len(news_data)} 条新新闻")
+    print(news_data)  # 打印所有新闻的标题和链接
