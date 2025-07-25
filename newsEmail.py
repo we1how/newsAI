@@ -3,7 +3,7 @@ import smtplib
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timedelta
 import news_analyzer  # 导入分析模块
 import stock2csv
 
@@ -44,11 +44,18 @@ def format_news_for_email(analysis_data):
         
         # 格式化时间
         pub_date = news.get("pub_date", "")
+        # 增加8小时时区偏移
         try:
             dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+            dt = dt + timedelta(hours=8)
             formatted_date = dt.strftime("%Y-%m-%d %H:%M")
         except:
             formatted_date = pub_date[:16]
+        # try:
+        #     dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+        #     formatted_date = dt.strftime("%Y-%m-%d %H:%M")
+        # except:
+        #     formatted_date = pub_date[:16]
         
         # 纯文本内容
         text_content.append(f"【{i}】{news['title']}")
@@ -84,7 +91,7 @@ def format_news_for_email(analysis_data):
                 html_content += f"""
                 <li class='stock-item'>
                     <span class='{impact_class}'>{symbol} {stock.get('stock', '')}</span>: 
-                    {stock.get('reason', '')}
+                     {stock.get("impact", "")},{stock.get('reason', '')}
                 </li>
                 """
             html_content += "</ul>"
@@ -209,20 +216,20 @@ def main():
     else:
         print("邮件发送失败")
     
-    # # 每小时运行一次
-    # while True:
-    #     next_run = time.time() + 7200
-    #     print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
-    #     time.sleep(7200)  # 等待2小时
+    # 每小时运行一次
+    while True:
+        next_run = time.time() + 7200
+        print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
+        time.sleep(7200)  # 等待2小时
 
-    #     # 执行转换
-    #     stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
+        # 执行转换
+        stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
 
-    #     print("\n开始新一轮新闻收集与发送...")
-    #     if send_news_email():
-    #         print("邮件发送成功!")
-    #     else:
-    #         print("没有新内容或邮件发送失败")
+        print("\n开始新一轮新闻收集与发送...")
+        if send_news_email():
+            print("邮件发送成功!")
+        else:
+            print("没有新内容或邮件发送失败")
 
 
 

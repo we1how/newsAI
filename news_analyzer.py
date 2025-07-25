@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 import time
 import json
@@ -92,21 +92,21 @@ def analyze_news_with_volcengine(news_item):
     prompt = f"""
 请分析以下新闻内容，完成以下任务：
 1. 将新闻内容总结成一句话；
-2. 判断分析该新闻对国内A股市场哪些具体股票有影响，并分析其影响是利好还是利空，给出具体的理由，如果没有则跳过该新闻；
-3. 可以有多个股票分析,按以下JSON格式返回结果：
+2. 判断分析该新闻对国内A股市场哪些具体股票的利好程度判断。从利好到利空依次分为“强烈利好”、“利好”、“中性”、“利空”、“强烈利空”5个等级。另外，如果不确定或者缺乏足够判断信息，或者新闻和要判断的股票关系不大，则跳过；
+3. 可以有多个股票分析,请用字典格式输出，在字典以外不要输出任何内容：
 {{
     "summary": "新闻的一句话总结(如果没有则用新闻标题代替)",
     "analysis": [
         {{
             "stock": "A股股票名称（股票代码.后缀）",
-            "impact": "利好/利空",
+            "impact": "强烈利好/利好/中性/利空/强烈利空",
             "reason": "影响理由"
         }}
     ]
 }}；
 
 4. 以下是要分析的新闻内容：
-{news_item['content']}  // 限制长度
+{news_item['content'][:3000]}  // 限制长度
 """
     
     try:
@@ -114,7 +114,8 @@ def analyze_news_with_volcengine(news_item):
             model="deepseek-r1-250528",
             # model = "deepseek-v3-250324",
             messages=[
-                {"role": "system", "content": "你是一个十分顶级专业的大师级金融分析师、股票专家，擅长从新闻中识别对股票的影响，并且不遗余力地给出专业的分析和建议。"},
+                # 你是一个有股票推荐经验的投资专家。你基于专业的投资知识，一步步的思考，推演并判断每条新闻对该股票的利好程度。
+                {"role": "system", "content": "你是顶级专业金融分析师、股票专家，擅长从新闻中识别对股票的影响，对股票给出专业的分析和判断。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
@@ -175,7 +176,8 @@ def save_analysis_data(data):
 
 def analyze_new_news():
     """分析新新闻并保存结果"""
-    RSS_URL = "https://rsshub.rssforever.com/cls/depth/1000"
+    # RSS_URL = "https://rsshub.app/cls/depth/1000"
+    RSS_URL = "http://localhost:1200/cls/depth/1000"  # 本地测试用
     
     print("正在获取财联社新新闻...")
     new_news = newsRss.fetch_cls_news(RSS_URL)
@@ -200,7 +202,7 @@ def analyze_new_news():
         combined = {
             "news": news,
             "analysis": analysis_result,
-            "analyzed_at": datetime.now(timezone.utc).isoformat()
+            "analyzed_at": (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
         }
         # analysis_results.append(combined)
         analyzed_links.append(news["link"]) # 无论分析结果如何，都记录链接
@@ -217,7 +219,7 @@ def analyze_new_news():
         print("-" * 80)
         
         # 避免请求过快
-        time.sleep(1)
+        time.sleep(3)
     
     if analysis_results:
         # 保存分析结果

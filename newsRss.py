@@ -7,7 +7,7 @@ import html
 import time
 import re
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # 全局配置文件路径
 LINKS_FILE = "analyzed_links.json"
@@ -58,7 +58,7 @@ def clean_html_content(html_content):
 def fetch_rss_content(rss_url):
     """直接获取RSS内容，绕过Cloudflare防护"""
     max_retries = 3
-    retry_delay = 5  # 增加延迟时间
+    retry_delay = 15  # 增加延迟时间
     
     for attempt in range(max_retries):
         try:
@@ -193,7 +193,7 @@ def fetch_cls_news(rss_url):
             'link': link
         })
     
-    return new_news[:5]
+    return new_news[:20]
 
 def mark_links_as_analyzed(links):
     """标记链接为已分析"""
@@ -205,13 +205,14 @@ def mark_links_as_analyzed(links):
             link_data["links"].append(link)
     
     # 更新最后更新时间
-    link_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+    link_data["last_updated"] = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
     
     # 保存
     save_analyzed_links(link_data)
 
 if __name__ == "__main__":
-    RSS_URL = "https://rsshub.rssforever.com/cls/depth/1000"
+    # RSS_URL = "https://rsshub.app/cls/depth/1000"
+    RSS_URL = "http://localhost:1200/cls/depth/1000"  # 本地测试用
 
     print("正在获取财联社新闻，可能需要一些时间...")
     news_data = fetch_cls_news(RSS_URL)
