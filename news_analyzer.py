@@ -111,7 +111,7 @@ def analyze_news_with_volcengine(news_item):
     
     try:
         response = client.chat.completions.create(
-            model="deepseek-r1-250528",
+            model="deepseek-v3-1-250821",
             # model = "deepseek-v3-250324",
             messages=[
                 # 你是一个有股票推荐经验的投资专家。你基于专业的投资知识，一步步的思考，推演并判断每条新闻对该股票的利好程度。

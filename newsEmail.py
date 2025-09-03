@@ -57,13 +57,17 @@ def format_news_for_email(analysis_data):
         # except:
         #     formatted_date = pub_date[:16]
         
+        # 股票影响分析
+        stock_analysis = analysis.get("analysis", [])
+        if not stock_analysis:
+            continue
+
         # 纯文本内容
         text_content.append(f"【{i}】{news['title']}")
         text_content.append(f"  时间: {formatted_date} | 作者: {news.get('author', '未知作者')}")
         text_content.append(f"  总结: {analysis.get('summary', '')}")
         
-        # 股票影响分析
-        stock_analysis = analysis.get("analysis", [])
+        
         if stock_analysis:
             text_content.append("  影响股票:")
             for stock in stock_analysis:
@@ -114,8 +118,8 @@ def format_news_for_email(analysis_data):
     
     return "\n".join(text_content), html_content
 
-def send_email_via_qq(subject, text_content, html_content, receiver):
-    """通过QQ邮箱发送邮件"""
+def send_email_via_qq(subject, text_content, html_content, receivers):
+    """通过QQ邮箱发送邮件给多个收件人"""
     # 邮箱配置
     smtp_server = "smtp.qq.com"
     port = 587  # QQ邮箱TLS端口
@@ -128,11 +132,15 @@ def send_email_via_qq(subject, text_content, html_content, receiver):
         print("未设置QQ邮箱或授权码环境变量")
         return False
     
+    # 确保receivers是列表格式
+    if isinstance(receivers, str):
+        receivers = [receivers]
+    
     # 创建邮件
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = email_user
-    msg["To"] = receiver
+    msg["To"] = ", ".join(receivers)  # 多个收件人用逗号分隔
     
     # 添加文本和HTML版本
     part1 = MIMEText(text_content, "plain", "utf-8")
@@ -146,18 +154,19 @@ def send_email_via_qq(subject, text_content, html_content, receiver):
         server.starttls()  # 启用TLS加密
         server.login(email_user, email_password)
         
-        # 发送邮件
-        server.sendmail(email_user, receiver, msg.as_string())
+        # 发送邮件给所有收件人
+        server.sendmail(email_user, receivers, msg.as_string())
         server.quit()
         
-        print(f"邮件已发送至: {receiver}")
+        print(f"邮件已发送至: {', '.join(receivers)}")
         return True
     except Exception as e:
         print(f"邮件发送失败: {str(e)}")
         return False
+    
 
 def send_news_email():
-    """发送新闻邮件"""
+    """发送新闻邮件给多个收件人"""
     # 1. 分析新新闻
     print("开始分析新新闻...")
     new_analysis = news_analyzer.analyze_new_news()
@@ -175,14 +184,22 @@ def send_news_email():
     # 4. 设置邮件主题和接收人
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     subject = f"📈 财经新闻分析报告 {date_str}"
-    receiver = os.environ.get("QQ_EMAIL")
     
-    if not receiver:
-        print("未设置接收邮箱")
+    # 从环境变量获取收件人列表（用逗号分隔）
+    receivers_env = os.environ.get("QQ_EMAIL_RECEIVERS", "")
+    if not receivers_env:
+        print("未设置接收邮箱列表")
+        return False
+    
+    # 分割收件人列表
+    receivers = [email.strip() for email in receivers_env.split(",") if email.strip()]
+    
+    if not receivers:
+        print("没有有效的收件人邮箱")
         return False
     
     # 5. 发送邮件
-    if send_email_via_qq(subject, text_content, html_content, receiver):
+    if send_email_via_qq(subject, text_content, html_content, receivers):
         print("邮件发送成功!")
         return True
     return False
@@ -191,6 +208,8 @@ def main():
     os.environ['QQ_EMAIL'] = '2698470157@qq.com'
     os.environ['QQ_EMAIL_PASSWORD'] = 'nrpwfrrkraagdgig'  # 替换为实际的授权码
 
+    os.environ['QQ_EMAIL_RECEIVERS'] = '2698470157@qq.com,1912315401@qq.com'
+    
     JSON_FILE = "news_analysis.json"
     EXCEL_FILE = "新闻股票跟踪.xlsx"
     
@@ -218,9 +237,9 @@ def main():
     
     # 每小时运行一次
     while True:
-        next_run = time.time() + 7200
+        next_run = time.time() + 3600
         print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
-        time.sleep(7200)  # 等待2小时
+        time.sleep(3600)  # 等待1小时
 
         # 执行转换
         stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
