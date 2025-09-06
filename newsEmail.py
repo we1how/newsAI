@@ -239,7 +239,7 @@ def main():
     while True:
         next_run = time.time() + 3600
         print(f"\n下次运行时间: {datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M')}")
-        time.sleep(7200)  # 等待1小时
+        time.sleep(3600)  # 等待1小时
 
         # 执行转换
         stock2csv.json_to_excel(JSON_FILE, EXCEL_FILE)
