@@ -12,7 +12,8 @@ ANALYSIS_FILE = "news_analysis.json"
 
 def get_volcengine_client():
     return OpenAI(
-        api_key='ba7b3e16-d8dc-4376-9003-ae52013e3506',
+        # api_key = 'ba7b3e16-d8dc-4376-9003-ae52013e3506',  # 旧密钥
+        api_key = 'ac548abc-ee0a-4f61-8a73-5478b8fa92cd',  # 新密钥
         base_url="https://ark.cn-beijing.volces.com/api/v3",
     )
 
@@ -111,8 +112,9 @@ def analyze_news_with_volcengine(news_item):
     
     try:
         response = client.chat.completions.create(
-            model="doubao-seed-1-6-thinking-250715",
+            # model="doubao-1-5-pro-256k-250115",
             # model = "deepseek-v3-250324",
+            model = "kimi-k2-250905",  # 2025-09-05 新模型
             messages=[
                 # 你是一个有股票推荐经验的投资专家。你基于专业的投资知识，一步步的思考，推演并判断每条新闻对该股票的利好程度。
                 {"role": "system", "content": "你是顶级专业金融分析师、股票专家，擅长从新闻中识别对股票的影响，对股票给出专业的分析和判断。"},
